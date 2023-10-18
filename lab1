@@ -1,0 +1,116 @@
+import pandas as pd
+import sqlite3
+
+# устанавливаем соединение
+con = sqlite3.connect(r"store")
+
+df = pd.read_sql('''
+SELECT book_id, title, b.author_id, name_author, b.genre_id, name_genre, price, amount
+FROM book as b, author, genre
+WHERE b.author_id = author.author_id AND b.genre_id = genre.genre_id;
+''', con)
+print(df)
+print ("----------------------------------------------------------------------")
+
+# Задание 1
+
+df = pd.read_sql('''
+SELECT title, name_author, name_genre
+FROM book
+JOIN author ON author.author_id = book.author_id
+JOIN genre ON genre.genre_id = book.genre_id
+WHERE amount > 4 AND (price < 200 OR price > 400)
+ORDER BY title, name_author;
+''', con)
+print(df)
+
+# Задание 2
+
+df = pd.read_sql('''
+SELECT name_author, COALESCE(SUM(price*amount), 0) as "Стоимость"
+FROM book
+RIGHT JOIN author ON author.author_id = book.author_id
+GROUP BY book.author_id
+ORDER BY SUM(price) DESC;
+''', con)
+print(df)
+
+# Задание 3
+
+df = pd.read_sql('''
+
+WITH count_book (b_count, b_author, b_id)
+AS 
+(
+SELECT COUNT(bb.book_id) AS b_count, b.author_id AS b_author, b.book_id as b_id
+FROM book as b, author as a, buy_book as bb
+WHERE a.author_id = b.author_id AND bb.book_id = b.book_id
+GROUP BY a.author_id
+),
+get_max (b_max)
+AS 
+(
+SELECT MAX(b_count) AS b_max
+FROM count_book
+)
+SELECT title, name_author, b_count as "Количество заказов"
+FROM count_book 
+JOIN get_max ON b_max = b_count
+JOIN author a ON a.author_id = b_author
+JOIN book b ON b_id = b.book_id;
+''', con)
+
+print(df)
+
+# Задание 4
+
+cursor = con.cursor()
+
+cursor.executescript('''
+DROP TABLE IF EXISTS report;
+  
+CREATE TABLE report AS
+SELECT buy.buy_id AS Заказ, client.city_id AS Город,
+(cast((julianday(bs.date_step_end) - julianday(bs.date_step_beg)) as integer))+1 AS Количество_дней,
+CASE WHEN (cast((julianday(bs.date_step_end) - julianday(bs.date_step_beg)) as integer))+1 > c.days_delivery
+THEN 'опоздание'
+ELSE 'вовремя'
+END AS Результат
+FROM buy
+JOIN buy_step bs ON buy.buy_id = bs.buy_id
+JOIN client ON buy.client_id = client.client_id
+JOIN city c ON client.city_id = c.city_id
+JOIN step ON bs.step_id = step.step_id
+WHERE step.name_step = 'Транспортировка' AND bs.date_step_end IS NOT NULL;
+''')
+
+df = pd.read_sql('''
+SELECT *
+FROM report;
+''', con)
+
+print(df)
+
+# Задание 5
+
+df = pd.read_sql('''
+SELECT a.name_author, title, price,
+ SUM(diff_count) AS Количество
+FROM 
+(
+SELECT b1.author_id, b1.title, b1.price, b1.book_id,
+COUNT(CASE WHEN ABS(b1.price - b2.price) <= 40 THEN b1.book_id END) 
+OVER win
+AS diff_count
+FROM book b1
+JOIN book b2 ON b1.author_id = b2.author_id AND b1.book_id <> b2.book_id
+WINDOW win 
+AS(
+PARTITION BY b1.author_id, b1.book_id, b2.author_id, b2.book_id
+)
+) fn
+JOIN author a ON a.author_id = fn.author_id
+GROUP BY fn.author_id, book_id;
+''', con)
+
+print(df)
